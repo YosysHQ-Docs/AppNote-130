@@ -3,6 +3,8 @@ Multi-Stage Verification
 
 This article presents a method for performing *multi-stage* formal verification on hardware designs using Yosys. In multi-stage verification, the verification process is divided into distinct phases, each with its own goals and properties to be verified. The design state at the end of one phase serves as the starting point for the next phase. Key to the method is the use of Yosys's ``sim`` pass to replay simulation traces and set up specific design states before proceeding with further formal verification.
 
+Note that some forms of multi-stage verification are already supported by existing tools such as `SCY <https://github.com/YosysHQ/scy>`_ (Sequence of Covers with Yosys). This article describes the general approach that underlies SCY, which can be used to manually implement more complex multi-stage verification flows than what SCY currently supports.
+
 At the highest level, each stage of multi-stage verification works as follows. Assuming we have a simulation trace from the previous stage that reaches the desired initial state, we first replay the trace into the design using Yosys's ``sim`` command with the ``-r`` option, which updates the design state to reflect the end of the trace. Then, we disable all assertions/assumptions/coverpoints/properties not relevant to this stage. Finally, we can then run formal verification from the updated design state using the enabled properties.
 
 There are two primary things you will learn from this walkthrough:
@@ -13,7 +15,9 @@ There are two primary things you will learn from this walkthrough:
 Note that this approach comes with significant caveats and limitations. Please read the Caveats section below before attempting to apply this method to your own designs.
 
 
-What follows is a concrete example illustrating this approach. 
+What follows is a concrete example illustrating this approach. Note that the current example is intentionally simple and could be implemented directly using SCY.
+
+TODO: show SCY implementation?
 
 Example Design Under Test
 -------------------------
@@ -190,14 +194,15 @@ In ``stage_1_fv``, we read in the prepared IL, remove all properties not associa
 
 When ``stage_1_fv`` completes and the cover point is hit, ``smtbmc`` produces a witness file, ``config_stage_1_fv/engine_0/trace0.yw``, which contains the input sequence and internal signal values that led to the cover point being hit. 
 
-![img](./image0.png)
+.. image:: ./image0.png
 
 ``stage_2_init`` is where we replay the witness generated in stage 1 to set up the design state for stage 2. We read in the original prepared IL from stage 1, and use the ``sim`` command with the ``-r`` option to replay the witness file. The ``-w`` option ensures that the final state of the design (i.e., register and memory values) after replaying the witness is written back into the RTLIL. Note that it is important to use the Yosys Witness output  with ``sim -r`` (instead of, e.g., VCD), as it is the highest fidelity and best suited for replay in Yosys simulation. We then write out the RTLIL (with its updated state) to ``stage_2_init.il``.
 
 
 Finally, in ``stage_2_fv``, we perform formal verification for stage 2. We read in the IL produced by ``stage_2_init``, remove all properties not associated with phase 2, and run ``smtbmc`` again to attempt to cover the phase 2 cover point (i.e., verifying that the second ack eventually arrives).
 
-![img](./image1.png)
+.. image:: ./image1.png
+
 
 Caveats
 -------
