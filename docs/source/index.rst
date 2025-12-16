@@ -7,10 +7,6 @@ Note that some forms of multi-stage verification are already supported by existi
 
 At the highest level, each stage of multi-stage verification works as follows. Assuming we have a simulation trace from the previous stage that reaches the desired initial state, we first replay the trace into the design using Yosys's ``sim`` command with the ``-r`` option, which updates the design state to reflect the end of the trace. Then, we disable all assertions/assumptions/coverpoints/properties not relevant to this stage. Finally, we can then run formal verification from the updated design state using the enabled properties.
 
-There are two primary things you will learn from this walkthrough:
-
-1. How to properly encode *all* properties from *all* verification stages within a single RTL design, and disable them on a stage-by-stage basis, and
-2. How to leverage Yosys's simulation capabilities to begin formal verification from a concrete design state obtained from a prior stage.
 
 Note that this approach comes with significant caveats and limitations. Please read the Caveats section below before attempting to apply this method to your own designs.
 
