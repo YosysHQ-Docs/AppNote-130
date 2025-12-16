@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-project = 'TODO: Project Name'
-author = 'TODO: Author'
+project = 'Multi-Stage Verification'
+author = 'Gus Smith'
 copyright = ''
 
 templates_path = ['_templates']
