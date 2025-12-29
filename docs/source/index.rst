@@ -72,13 +72,16 @@ Our example design is as follows:
                         phase1_reqs_seen: cover(reqs_seen == 2);
                 end
 
-                // In phase 2, assume that there's no more reqs; then assert bounded req
-                // and ack counts from this baked state.
+                // In phase 2, assume that there's no more reqs; then assert the second
+                // ack arrives promptly and that ack count never exceeds two.
                 always @ (posedge clk) begin
                         phase2_no_new_req: assume(!req);
                 end
+                phase2_assert_ack_reaches_two: assert property (@(posedge clk)
+                        $rose(reqs_seen == 2) |-> ##[1:8] acks_seen == 2
+                );
                 always @(posedge clk) begin
-                        phase2_assert_ack_count: assert(acks_seen <= 2);
+                        phase2_assert_ack_stable: assert(acks_seen <= 2);
                 end
 
 
@@ -100,7 +103,7 @@ Example Verification Goal
 In this example, we have a simple, two-step verification goal.
 
 1. In the first stage, we want to reach a cover point in which one req-ack pair has occurred, and another req has been issued but not yet acknowledged, leaving the design in a state where it is waiting for the second ack.
-2. In the second stage, starting from the state reached in stage 1 and assuming no more requests come in, we want to prove that no further acks occur beyond the two already seen.
+2. In the second stage, starting from the state reached in stage 1 and assuming no more requests come in, we want to prove that the second ack arrives within a bounded window and that no additional acks occur beyond the two already seen.
 
 While this example seems contrived, it illustrates the important point: using this approach, the design state at the end of stage 1 can be fully reproduced at the start of stage 2, thus allowing the formal tools to "see" that we are waiting for the second ack. This demonstrates that the underlying formal verification machinery persists its state across each stage.
 
@@ -199,7 +202,7 @@ As you can see, the first req and ack pair occurs, followed by the second req pu
 ``stage_2_init`` is where we replay the witness generated in stage 1 to set up the design state for stage 2. We read in the original prepared IL from stage 1, and use the ``sim`` command with the ``-r`` option to replay the witness file. The ``-w`` option ensures that the final state of the design (i.e., register and memory values) after replaying the witness is written back into the RTLIL. Note that it is important to use the Yosys Witness output with ``sim -r`` (instead of, e.g., VCD), as it is the highest fidelity and best suited for replay in Yosys simulation. The resulting state-updated IL is written as ``design_prep.il`` under the ``stage_2_init`` directory.
 
 
-Finally, in ``stage_2_assert``, we perform formal verification for stage 2. We read in the IL produced by ``stage_2_init``, remove all properties not associated with phase 2, and run ``smtbmc`` in ``prove`` mode to show that no additional acks are possible from this baked state.
+Finally, in ``stage_2_assert``, we perform formal verification for stage 2. We read in the IL produced by ``stage_2_init``, remove all properties not associated with phase 2, and run ``smtbmc`` in ``prove`` mode to show that the second ack arrives within the required window and that ack count never exceeds two.
 
 
 Caveats
