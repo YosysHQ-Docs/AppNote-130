@@ -126,10 +126,12 @@ We can implement the desired flow using a single ``staged.sby`` file that covers
   cover:
   mode cover
   depth 40
+  skip_prep on
 
   assert:
   mode prove
   depth 40
+  skip_prep on
 
   --
 
@@ -142,6 +144,7 @@ We can implement the desired flow using a single ``staged.sby`` file that covers
   stage_1_init:
   verific -formal Req_Ack.sv
   hierarchy -top DUT
+  prep
 
   stage_1_cover:
   read_rtlil design_prep.il
@@ -181,7 +184,7 @@ We can implement the desired flow using a single ``staged.sby`` file that covers
 
 The file defines four tasks. We will now walk through each of them in turn.
 
-Each stage is implemented as two tasks: an ``init`` task that prepares the design state (e.g. via simulation), and a verification task that enables only the relevant properties and performs formal verification from that state.
+Each stage is implemented as two tasks: an ``init`` task that prepares the design state (e.g. via simulation), and a verification task that enables only the relevant properties and performs formal verification from that state. Only the first task runs ``prep``; later tasks set ``skip_prep on`` to reuse the baked IL.
 
 In ``stage_1_init``, we prep the design using sby's default flow using ``mode prep``. This produces the ``design_prep.il`` IL file which serves as the starting point for the first formal verification stage. As this is the initial state, we do not simulate. Note that ``engine`` is set to ``none``, indicating that no formal checking is performed in this task.
 
