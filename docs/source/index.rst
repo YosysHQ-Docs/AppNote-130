@@ -294,8 +294,11 @@ With that cover-only DUT, SCY can encode the sequence using the following .scy f
   Req_Ack.sv
 
   [sequence]
+  # Disable the phase-2 assume during the first cover, then re-enable it.
+  disable cover_phase2_no_new_req
   # 1) Reach the state after the second req pulse.
   cover cover_phase1:
+      enable cover_phase2_no_new_req
       # 2) Continue from that state to see the matching ack.
       cover cover_phase2
 
