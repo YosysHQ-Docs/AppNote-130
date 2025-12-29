@@ -217,10 +217,65 @@ To effectively use this method, first understand the caveats:
 - **No retroactive assumptions.** Assumptions from later stages cannot constrain earlier timesteps. If you need multi-cycle assumptions spanning the stage boundary, extend the witness a few cycles before shortening it, or rewrite them to be combinational in terms of free inputs.
 
 
-SCY Equivalent
---------------
+A Similar Example Using SCY
+-----------------------------
 
-As mentioned, certain forms of multi-stage verification are already supported by existing tools such as SCY. The above two-stage flow can also be expressed directly with SCY using the following ``scy`` configuration file:
+As mentioned earlier, SCY can also be used to implement multi-stage verification flows, albeit with some limitations. SCY currently only supports sequences of cover statements. We modify the example above to include only cover statements in stage 2, removing the assertions:
+
+.. code-block:: systemverilog
+
+        module DUT (
+                input  logic clk,
+                output logic req,
+                output logic ack
+        );
+
+        `ifdef FORMAL
+
+                logic [1:0] reqs_seen;
+                logic [31:0] cycle_count;
+
+                initial begin
+                        reqs_seen = 2'b0;
+                        cycle_count = 32'b0;
+                end
+
+                always @ (posedge clk) begin
+                        if (req) reqs_seen <= reqs_seen + 1;
+                        cycle_count <= cycle_count + 1;
+                end
+
+                assume property (@(posedge clk)
+                        req |-> ##1 !req
+                );
+                assume property (@(posedge clk)
+                        req |-> ##1 (!req [*7])
+                );
+                assume property (@(posedge clk)
+                        req |-> ##4 ack
+                );
+                assume property (@(posedge clk)
+                        !$past(req,4) |-> !ack
+                );
+
+                always @(posedge clk) begin
+                        cover_phase1: cover(reqs_seen == 2);
+                end
+
+                always @ (posedge clk) begin
+                        cover_phase2_no_new_req: assume(!req);
+                end
+                always @(posedge clk) begin
+                        cover_phase2: cover(ack);
+                end
+
+        `endif
+
+        endmodule
+
+This simpler example simply states that the second ack should eventually arrive after the second req.
+
+With that cover-only DUT, SCY can encode the sequence using the following .scy file:
 
 .. code-block:: text
 
@@ -244,6 +299,4 @@ As mentioned, certain forms of multi-stage verification are already supported by
       # 2) Continue from that state to see the matching ack.
       cover cover_phase2
 
-Here ``cover_phase1`` and ``cover_phase2`` are the named covers in the accompanying ``Req_Ack.sv``; SCY sequences them automatically, replaying the witness from the first cover as the starting point for the second.
-
-Using SCY simplifies the process of multi-stage verification by automating the witness replay and property management between stages, and allows the user to avoid potential pitfalls. However, the manual approach described earlier provides more flexibility for complex scenarios that may not be directly supported by SCY.
+Using SCY simplifies the process of multi-stage verification by automating the witness replay and property management between stages, and allows the user to avoid potential pitfalls. However, the manual approach described earlier provides more flexibility for complex scenarios (such as the assertion branch in stage 2) that may not be directly supported by SCY.
