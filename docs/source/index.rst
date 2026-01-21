@@ -5,7 +5,7 @@ This article presents a method for performing *multi-stage* formal verification 
 
 Note that some forms of multi-stage verification are already supported by existing tools such as `SCY <https://github.com/YosysHQ/scy>`_ (Sequence of Covers with Yosys). As the name implies, SCY currently only supports sequences of cover statements. This article describes the general approach that underlies SCY, which can be used to manually implement more complex multi-stage verification flows than what SCY currently supports.
 
-At the highest level, each stage of multi-stage verification works as follows. Assuming we have a simulation trace from the previous stage that reaches the desired initial state, we first replay the trace into the design using Yosys's ``sim`` command with the ``-r`` option, which updates the design state to reflect the end of the trace. Then, we disable all assertions/assumptions/coverpoints/properties not relevant to this stage. Finally, we can then run formal verification from the updated design state using the enabled properties.
+At the highest level, each stage of multi-stage verification works as follows. Assuming we have a simulation trace from the previous stage that reaches the desired initial state, we first replay the trace into the design using Yosys's ``sim`` command with the ``-r`` and ``-w`` options, which replay inputs from a trace file and update the design state to reflect the end of the trace, respectively. Then, we disable all assertions/assumptions/coverpoints/properties not relevant to this stage. Finally, we can then run formal verification from the updated design state using the enabled properties. The trace returned by formal verification can then be used to set up the next stage, and so on.
 
 
 Note that this approach comes with significant caveats and limitations. Please read the Caveats section below before attempting to apply this method to your own designs.
@@ -29,14 +29,14 @@ Our example design is as follows:
 
         `ifdef FORMAL
 
-                logic [1:0] reqs_seen;
-                logic [1:0] acks_seen;
+                logic [31:0] reqs_seen;
+                logic [31:0] acks_seen;
                 logic [31:0] cycle_count;
 
                 // Deterministic initial state
                 initial begin
-                        reqs_seen = 2'b0;
-                        acks_seen = 2'b0;
+                        reqs_seen = 32'b0;
+                        acks_seen = 32'b0;
                         cycle_count = 32'b0;
                 end
 
@@ -69,21 +69,30 @@ Our example design is as follows:
                 // For the purpose of demonstration, stop exactly when second req pulse
                 // occurs. This leaves us in a state where we're waiting for the second ack.
                 always @(posedge clk) begin
-                        phase1_reqs_seen: cover(reqs_seen == 2);
+                        stage1_reqs_seen: cover(reqs_seen == 2);
                 end
 
-                // In phase 2, assume that there's no more reqs; then assert the second
-                // ack arrives promptly and that ack count never exceeds two.
-                always @ (posedge clk) begin
-                        phase2_no_new_req: assume(!req);
-                end
-                phase2_assert_ack_reaches_two: assert property (@(posedge clk)
-                        $rose(reqs_seen == 2) |-> ##[1:8] acks_seen == 2
+                // In stage 2, cover that the first ack arrives within a bounded window
+                // after the first req + another req arrives.
+                stage2_cover_ack_and_new_req: cover property (@(posedge clk)
+                        $rose(ack) ##[1:$] (reqs_seen == 3)
                 );
-                always @(posedge clk) begin
-                        phase2_assert_ack_stable: assert(acks_seen <= 2);
+
+
+                // In stage 3, assume that there's no more reqs.
+                always @ (posedge clk) begin
+                        stage3_shared_no_new_req: assume(!req);
                 end
 
+                // In stage 3a, cover the second ack arriving eventually.
+                always @(posedge clk) begin
+                        stage3a_cover_ack: cover(ack);
+                end
+
+                // In stage 3b, assert that once we've seen 3 acks, we stay at 3 acks.
+                stage3b_acks_remains_3: assert property (
+                        @(posedge clk) $rose(acks_seen == 3) |-> (acks_seen == 3)[*1:$]
+                );
 
         `endif
 
@@ -94,116 +103,171 @@ The design has two outputs, ``req`` and ``ack``, representing a simple request-a
 
 In staged verification, we use a single testbench which includes all desired verification properties. Later in the process, we will disable properties on a stage-by-stage basis. However, to ensure signals can be matched properly in each stage, it is crucial to always start from the same original testbench including all properties.
 
-Properties for each stage are given ``phase1_*`` and ``phase2_*`` labels. These labels allow us to selectively include or exclude properties during different verification stages using Yosys's ``select`` command.
+Properties for each stage are given ``stage1_*``, ``stage2_*``, ``stage3_shared_*``, ``stage3a_*``, and ``stage3b_*`` labels. These labels allow us to selectively include or exclude properties during different verification stages using Yosys's ``select`` command.
 
 
 Example Verification Goal
 -------------------------
 
-In this example, we have a simple, two-step verification goal.
+In this example, we have a simple, three-step verification goal.
 
-1. In the first stage, we want to reach a cover point in which one req-ack pair has occurred, and another req has been issued but not yet acknowledged, leaving the design in a state where it is waiting for the second ack.
-2. In the second stage, starting from the state reached in stage 1 and assuming no more requests come in, we want to prove that the second ack arrives within a bounded window and that no additional acks occur beyond the two already seen.
+1. In the first stage, we want to reach a cover point in which one req-ack pair has occurred, and a second req has been issued but not yet acknowledged.
+2. In the second stage, starting from the state reached in stage 1, we cover the second ack arriving, followed by a third req arriving.
+3. In the third stage, starting from the state reached in stage 2 and assuming no more requests come in, we branch into two separate formal verification tasks: in one task, we cover the third ack arriving, and in the other, we assert that the ack count stays at three once it reaches that value.
 
-While this example seems contrived, it illustrates the important point: using this approach, the design state at the end of stage 1 can be fully reproduced at the start of stage 2, thus allowing the formal tools to "see" that we are waiting for the second ack. This demonstrates that the underlying formal verification machinery persists its state across each stage.
+While this example seems contrived, it illustrates the important point: using this approach, the design state at the end of stage 1 can be fully reproduced at the start of stage 2 (and similarly for stage 3), allowing the formal tools to "see" the current state and its pending acks. This demonstrates that the underlying formal verification machinery persists its state across each stage.
 
-Furthermore, this simple example goes beyond the capabilities of SCY, which currently only supports sequences of cover statements. Here, stage 2 involves an assertion rather than a cover, showcasing the flexibility of the manual approach.
+Furthermore, this simple example goes beyond the capabilities of SCY, which currently only supports sequences of cover statements. Here, stage 3b involves an assertion rather than a cover, showcasing the flexibility of the manual approach.
 
 Implementation
 --------------
 
-We can implement the desired flow using a single ``staged.sby`` file that covers in stage 1 and asserts in stage 2:
+We can implement the desired flow using a single ``staged.sby`` file that covers in stages 1 and 2, then splits into a cover and an assertion branch in stage 3:
 
 .. code-block:: text
 
   [tasks]
-  stage_1_init init
-  stage_1_cover cover
-  stage_2_init init
-  stage_2_assert assert
+  prep
+  stage_1 cover
+  stage_2 cover
+  stage_3_init
+  stage_3a_cover cover
+  stage_3b_assert
 
   [options]
-  init:
+  prep:
   mode prep
 
   cover:
   mode cover
-  depth 40
   skip_prep on
 
-  assert:
+  stage_3_init:
+  mode prep
+  skip_prep on
+
+  stage_3b_assert:
   mode prove
-  depth 40
   skip_prep on
 
   --
 
   [engines]
-  init: none
-  cover: smtbmc
-  assert: smtbmc
+  prep:
+  none
+
+  cover:
+  smtbmc
+
+  stage_3_init:
+  none
+
+  stage_3b_assert:
+  smtbmc
 
   [script]
-  stage_1_init:
+  prep:
   verific -formal Req_Ack.sv
   hierarchy -top DUT
   prep
 
-  stage_1_cover:
+  stage_1:
   read_rtlil design_prep.il
-  # This selection computes (all phase-labeled things) - (all phase-1-labeled
-  # things) to remove all phase-tagged SVA constructs not intended for phase 1.
-  select */c:phase* */c:phase1_* %d
+  write_rtlil stage_1_init.il
+  # This selection computes (all stage-labeled things) - (all stage-1-labeled
+  # things) to remove all stage-tagged SVA constructs not intended for stage 1.
+  select */c:stage* */c:stage1* %d
   delete
 
-  stage_2_init:
-  read_rtlil design_prep.il
+  stage_2:
+  read_rtlil stage_1_init.il
   sim -a -w -scope DUT -r trace0.yw
+  write_rtlil stage_2_init.il
+  select */c:stage* */c:stage2* %d
+  delete
 
-  stage_2_assert:
-  read_rtlil design_prep.il
-  # This selection computes (all phase-labeled things) - (all phase-2-labeled
-  # things) to remove all phase-tagged SVA constructs not intended for phase 2.
-  select */c:phase* */c:phase2_* %d
+  stage_3_init:
+  read_rtlil stage_2_init.il
+  sim -a -w -scope DUT -r trace0.yw -noinitstate
+  write_rtlil stage_3_init.il
+
+  stage_3a_cover:
+  read_rtlil stage_3_init.il
+  select */c:stage* */c:stage3_shared* */c:stage3a* %u %d
+  delete
+
+  stage_3b_assert:
+  read_rtlil stage_3_init.il
+  select */c:stage* */c:stage3_shared* */c:stage3b* %u %d
   delete
 
   --
 
   [files]
 
-  stage_1_init:
+  prep:
   Req_Ack.sv
 
-  stage_1_cover:
-  staged_stage_1_init/model/design_prep.il
+  stage_1:
+  staged_prep/model/design_prep.il
 
-  stage_2_init:
-  staged_stage_1_init/model/design_prep.il
-  staged_stage_1_cover/engine_0/trace0.yw
+  stage_2:
+  staged_stage_1/src/stage_1_init.il
+  staged_stage_1/engine_0/trace0.yw
 
-  stage_2_assert:
-  staged_stage_2_init/model/design_prep.il
+  stage_3_init:
+  staged_stage_2/src/stage_2_init.il
+  staged_stage_2/engine_0/trace0.yw
+
+  stage_3a_cover:
+  staged_stage_3_init/src/stage_3_init.il
+
+  stage_3b_assert:
+  staged_stage_3_init/src/stage_3_init.il
 
 
-The file defines four tasks. We will now walk through each of them in turn.
+The file defines multiple tasks. We will now walk through each of them in turn.
 
-Each stage is implemented as two tasks: an ``init`` task that prepares the design state (e.g. via simulation), and a verification task that enables only the relevant properties and performs formal verification from that state. Only the first task runs ``prep``; later tasks set ``skip_prep on`` to reuse the baked IL.
+The flow starts with a dedicated ``prep`` task that runs SBY's full preparation step and generates the canonical ``design_prep.il``. Note that the ``prep`` pass run inside the ``[script]`` section is only the Yosys synthesis pass, and does not replace SBY's internal preparation pipeline.
 
-In ``stage_1_init``, we prep the design using sby's default flow using ``mode prep``. This produces the ``design_prep.il`` IL file which serves as the starting point for the first formal verification stage. As this is the initial state, we do not simulate. Note that ``engine`` is set to ``none``, indicating that no formal checking is performed in this task.
+.. warning::
+        It is crucial that your first and second stages both start from a version of the design which has been prepared using SBY's preparation step, but hasn't had other modifications applied. Having a separate ``prep`` stage is a clean way to ensure this.
 
-In ``stage_1_cover``, we read in the prepared IL, remove all properties not associated with phase 1 using ``select`` and ``delete`` (by filtering on the ``phase1_*`` labels), and run the ``smtbmc`` engine to attempt to cover the phase 1 cover point. 
+In stage 1, we read in the design prepared by the ``prep`` stage and checkpoint it as ``stage_1_init.il``. Note that ``stage_1_init.il`` is identical to ``design_prep.il`` at this point; we follow this pattern for consistency across stages. 
 
-When ``stage_1_cover`` completes and the cover point is hit, ``smtbmc`` produces a witness file, ``staged_stage_1_cover/engine_0/trace0.yw``, which contains the input sequence and internal signal values that led to the cover point being hit. The trace will look something like this:
+After loading the design, we use the ``select`` command to disable all properties except those relevant to stage 1. The selection expression ``*/c:stage* */c:stage1* %d`` matches all properties with a ``stage*`` label and subtracts all properties with a ``stage1*`` label. Deleting this selection removes all properties not intended for stage 1.
+
+After the user-provided script in the ``[script]`` section runs, SBY invokes the specified engine (``smtbmc``) to run formal verification on the filtered design. ``smtbmc`` produces a witness file, ``staged_stage_1/engine_0/trace0.yw``, which contains the sequence of values that led to the cover point being hit. The trace will look something like this:
 
 .. image:: ./image0.png
+        :align: center
 
 As you can see, the first req and ack pair occurs, followed by the second req pulse, at which point the trace ends.
 
-``stage_2_init`` is where we replay the witness generated in stage 1 to set up the design state for stage 2. We read in the original prepared IL from stage 1, and use the ``sim`` command with the ``-r`` option to replay the witness file. The ``-w`` option ensures that the final state of the design (i.e., register and memory values) after replaying the witness is written back into the RTLIL. Note that it is important to use the Yosys Witness output with ``sim -r`` (instead of, e.g., VCD), as it is the highest fidelity and best suited for replay in Yosys simulation. The resulting state-updated IL is written as ``design_prep.il`` under the ``stage_2_init`` directory.
+Stage 2 begins by reading in the ``stage_1_init.il`` checkpoint, which represents the design state at the start of stage 1, before the stage 1 trace is replayed. We use the ``sim`` command with ``-r`` and ``-w`` to replay the witness file and bake the final state into the RTLIL. We then checkpoint this updated design state as ``stage_2_init.il``, representing the design state at the end of stage 1 and beginning of stage 2.
+
+.. tip::
+        The ``sim`` command is essential to this approach, as it allows us to accurately reproduce the design state reached in the previous stage.
+
+Stage 2 then proceeds as did stage 1: we delete all non-stage-2 properties and run the stage-2 cover, producing the following trace:
 
 
-Finally, in ``stage_2_assert``, we perform formal verification for stage 2. We read in the IL produced by ``stage_2_init``, remove all properties not associated with phase 2, and run ``smtbmc`` in ``prove`` mode to show that the second ack arrives within the required window and that ack count never exceeds two.
+.. image:: ./image1.png
+        :align: center
 
+Crucially, you can see that the trace continues from where stage 1 left off, with the second req already issued and waiting for its ack, and with the counter values preserved.
+
+Finally, in stage 3, we show a branching point with two separate tasks: first, a coverpoint, and second, an assertion. To handle this forking structure, we introduce an intermediate ``stage_3_init`` task that replays the stage-2 witness to set up the design state for both branches. Unlike the first replay, this simulation is technically not starting at t=0, and thus we include ``-noinitstate`` to indicate to the ``sim`` routine that any ``$initstate`` cells (which are active only at t=0) should be disabled. The updated design state is written as ``stage_3_init.il``.
+
+.. warning::
+        When continuing a simulation which begins at time greater than 0, always use ``-noinitstate`` to avoid re-applying any ``$initstate`` logic. In general, this will be every usage of ``sim`` after the first. In this tutorial, we do not use it in stage 2, but we do in stage 3, and would in any further stages.
+
+Finally, ``stage_3a_cover`` and ``stage_3b_assert`` both read the stage-3 checkpoint, filter down to their respective property sets (both including the stage-3 shared assumptions), and run cover/prove as appropriate. Stage 3a produces the following trace:
+
+.. image:: ./image2.png
+        :align: center
+
+As you can see, the trace continues from where stage 2 left off, with the third req already issued; within a few cycles, the third ack arrives, hitting the cover point.
 
 Caveats
 -------
@@ -214,13 +278,14 @@ To effectively use this method, first understand the caveats:
 - **Only remove properties between stages.** The RTLIL must remain the same aside from baked init values. Do not add or alter HDL, ports, or clocks between stages, or the witness mapping will fail.
 - **Keep environment signals free.** Anything mentioned in an ``assume`` that the environment controls must be an ``input`` or ``anyseq``; ``sim`` cannot drive outputs.
 - **Witness format.** Stick to ``.yw`` (Yosys witness). VCD is lossy and can miss anyseq/internal names; YW carries the exact solver-driven signals.
+- **Initial-state handling.** Only the first replay starts at t=0. For any replay that continues from a prior witness, use ``sim -noinitstate`` to avoid re-applying ``$initstate`` logic.
 - **No retroactive assumptions.** Assumptions from later stages cannot constrain earlier timesteps. If you need multi-cycle assumptions spanning the stage boundary, extend the witness a few cycles before shortening it, or rewrite them to be combinational in terms of free inputs.
 
 
 A Similar Example Using SCY
 -----------------------------
 
-As mentioned earlier, SCY can also be used to implement multi-stage verification flows, albeit with some limitations. SCY currently only supports sequences of cover statements. We modify the example above to include only cover statements in stage 2, removing the assertions:
+As mentioned earlier, SCY can also be used to implement multi-stage verification flows, albeit with some limitations. SCY currently only supports sequences of cover statements. We modify the example above to include only cover statements through stage 3a, removing the stage-3b assertion:
 
 .. code-block:: systemverilog
 
@@ -232,16 +297,19 @@ As mentioned earlier, SCY can also be used to implement multi-stage verification
 
         `ifdef FORMAL
 
-                logic [1:0] reqs_seen;
+                logic [31:0] reqs_seen;
+                logic [31:0] acks_seen;
                 logic [31:0] cycle_count;
 
                 initial begin
-                        reqs_seen = 2'b0;
+                        reqs_seen = 32'b0;
+                        acks_seen = 32'b0;
                         cycle_count = 32'b0;
                 end
 
                 always @ (posedge clk) begin
                         if (req) reqs_seen <= reqs_seen + 1;
+                        if (ack && !$past(ack)) acks_seen <= acks_seen + 1;
                         cycle_count <= cycle_count + 1;
                 end
 
@@ -259,21 +327,25 @@ As mentioned earlier, SCY can also be used to implement multi-stage verification
                 );
 
                 always @(posedge clk) begin
-                        cover_phase1: cover(reqs_seen == 2);
+                        stage1_reqs_seen: cover(reqs_seen == 2);
                 end
 
+                stage2_cover_ack_and_new_req: cover property (@(posedge clk)
+                        $rose(ack) ##[1:$] (reqs_seen == 3)
+                );
+
                 always @ (posedge clk) begin
-                        cover_phase2_no_new_req: assume(!req);
+                        stage3_no_new_req: assume(!req);
                 end
                 always @(posedge clk) begin
-                        cover_phase2: cover(ack);
+                        stage3_cover_ack: cover(ack);
                 end
 
         `endif
 
         endmodule
 
-This simpler example simply states that the second ack should eventually arrive after the second req.
+This simpler example follows the same three-stage cover sequence, but omits the stage-3b assertion.
 
 With that cover-only DUT, SCY can encode the sequence using the following .scy file:
 
@@ -294,12 +366,14 @@ With that cover-only DUT, SCY can encode the sequence using the following .scy f
   Req_Ack.sv
 
   [sequence]
-  # Disable the phase-2 assume during the first cover, then re-enable it.
-  disable cover_phase2_no_new_req
+  # Disable the stage-3 assume during the early covers, then re-enable it.
+  disable stage3_no_new_req
   # 1) Reach the state after the second req pulse.
-  cover cover_phase1:
-      enable cover_phase2_no_new_req
-      # 2) Continue from that state to see the matching ack.
-      cover cover_phase2
+  cover stage1_reqs_seen:
+      # 2) Continue from that state to see an ack and another req.
+      cover stage2_cover_ack_and_new_req:
+          enable stage3_no_new_req 
+          # 3) Continue from that state to see the second ack.
+          cover stage3_cover_ack
 
-Using SCY simplifies the process of multi-stage verification by automating the witness replay and property management between stages, and allows the user to avoid potential pitfalls. However, the manual approach described earlier provides more flexibility for complex scenarios (such as the assertion branch in stage 2) that may not be directly supported by SCY.
+Using SCY simplifies the process of multi-stage verification by automating the witness replay and property management between stages, and allows the user to avoid potential pitfalls. However, the manual approach described earlier provides more flexibility for complex scenarios (such as the assertion branch in stage 3b) that may not be directly supported by SCY.
