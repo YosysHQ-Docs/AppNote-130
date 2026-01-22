@@ -109,7 +109,7 @@ Properties for each stage are given ``stage1_*``, ``stage2_*``, ``stage3_shared_
 Example Verification Goal
 -------------------------
 
-In this example, we have a simple, three-step verification goal.
+In this example, we have a simple, three-stage verification goal.
 
 1. In the first stage, we want to reach a cover point in which one req-ack pair has occurred, and a second req has been issued but not yet acknowledged.
 2. In the second stage, starting from the state reached in stage 1, we cover the second ack arriving, followed by a third req arriving.
