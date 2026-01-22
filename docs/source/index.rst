@@ -335,10 +335,10 @@ As mentioned earlier, SCY can also be used to implement multi-stage verification
                 );
 
                 always @ (posedge clk) begin
-                        stage3_no_new_req: assume(!req);
+                        stage3_shared_no_new_req: assume(!req);
                 end
                 always @(posedge clk) begin
-                        stage3_cover_ack: cover(ack);
+                        stage3a_cover_ack: cover(ack);
                 end
 
         `endif
@@ -366,14 +366,16 @@ With that cover-only DUT, SCY can encode the sequence using the following .scy f
   Req_Ack.sv
 
   [sequence]
-  # Disable the stage-3 assume during the early covers, then re-enable it.
-  disable stage3_no_new_req
   # 1) Reach the state after the second req pulse.
   cover stage1_reqs_seen:
       # 2) Continue from that state to see an ack and another req.
       cover stage2_cover_ack_and_new_req:
-          enable stage3_no_new_req 
           # 3) Continue from that state to see the second ack.
-          cover stage3_cover_ack
+          cover stage3a_cover_ack:
+              enable stage3_shared_no_new_req
+
+Placing
+``enable stage3_shared_no_new_req`` inside the final cover activates the “no new
+req” assumption only for stage 3a, and implicitly disables it for earlier stages.
 
 Using SCY simplifies the process of multi-stage verification by automating the witness replay and property management between stages, and allows the user to avoid potential pitfalls. However, the manual approach described earlier provides more flexibility for complex scenarios (such as the assertion branch in stage 3b) that may not be directly supported by SCY.
