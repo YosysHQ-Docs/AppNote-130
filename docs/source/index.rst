@@ -98,6 +98,7 @@ Our example design is as follows:
 
         endmodule
 
+Note that our design is written with Verific-based parsing in mind, which supports a wider range of SVA constructs. However, the example could be adapted to use Yosys's built-in SystemVerilog parser or yosys-slang.
 
 The design has two outputs, ``req`` and ``ack``, representing a simple request-acknowledgment protocol. The design's behavior is defined using formal properties in a ``FORMAL`` block, including counters that track how many req/ack pulses have occurred. Note that in a real design, the ``req`` and ``ack`` signals would typically be driven by internal logic; here, we define their behavior via formal properties to keep the example concise.
 
@@ -164,6 +165,8 @@ We can implement the desired flow using a single ``staged.sby`` file that covers
 
   stage_3b_assert:
   smtbmc
+
+  --
 
   [script]
   prep:
@@ -242,7 +245,7 @@ The file defines multiple tasks. To actually run the flow, invoke each task one-
 
 We will now walk through each task in turn.
 
-The flow starts with a dedicated ``prep`` task that runs SBY's full preparation step and generates the canonical ``design_prep.il``. Note that the ``prep`` pass run inside the ``[script]`` section is only the Yosys synthesis pass, and does not replace SBY's internal preparation pipeline.
+The flow starts with a dedicated ``prep`` task that runs SBY's full preparation step and generates the canonical ``design_prep.il``. Note that the ``prep`` pass run inside the ``[script]`` section is only the Yosys synthesis pass, and does not replace SBY's internal preparation pipeline, which runs after the user-provided script completes.
 
 .. warning::
         It is crucial that your first stage starts from a version of the design which has been prepared using SBY's preparation step, but hasn't had other modifications applied (e.g. deleting stage-specific properties). Having a separate ``prep`` stage is a clean way to ensure this.
@@ -308,7 +311,6 @@ To effectively use this method, first understand the caveats:
 - **SBY-generated artifacts.** This flow depends on SBY-emitted files (for example, ``design_prep.il`` and per-stage ``engine_0/trace0.yw``). These names are implementation details and may change across SBY versions, requiring updates to ``[files]`` mappings and scripts.
 - **Sequential execution.** Run tasks one-by-one. SBY defaults to parallel task execution, which leads to race conditions on the intermediate ``.il``/``.yw`` artifacts. Always run tasks manually to ensure proper sequential execution.
 - **Skipping prep.** Only the first task should run SBY's full prep. All later tasks should set ``skip_prep on``.
-- **No retroactive assumptions.** Assumptions from later stages cannot constrain earlier timesteps. If you need multi-cycle assumptions spanning the stage boundary, extend the witness a few cycles before shortening it, or rewrite them to be combinational in terms of free inputs.
 
 
 A Similar Example Using SCY
