@@ -3,16 +3,23 @@ project = 'Multi-Stage Verification'
 author = 'Gus Smith'
 copyright = ''
 
-templates_path = ['_templates']
-html_theme = "furo"
-html_static_path = ['_static', 'media']
+# select HTML theme
+html_theme = 'furo-ys'
+html_css_files = ['custom.css']
+html_theme_options: dict[str, str] = {
+    "source_repository": "https://github.com/YosysHQ-Docs/AppNote-130",
+    "source_branch": "main",
+    "source_directory": "docs/source/",
+}
 
-html_logo = None
-html_favicon = None
-html_css_files = []
+# These folders are copied to the documentation's HTML output
+html_static_path = ['_static', '_images']
 
-pygments_style = 'colorful'
+# code blocks style 
 highlight_language = 'text'
 
-html_theme_options = {}
+# generate section labels from their heading
 extensions = ['sphinx.ext.autosectionlabel']
+
+# ensure that autosectionlabel will produce unique names
+autosectionlabel_prefix_document = True
