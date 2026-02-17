@@ -125,7 +125,7 @@ Implementation
 
 We can implement the desired flow using a single ``staged.sby`` file that covers in stages 1 and 2, then splits into a cover and an assertion branch in stage 3:
 
-.. code-block:: text
+.. code-block:: sby
 
   [tasks]
   prep

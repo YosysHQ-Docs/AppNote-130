@@ -23,3 +23,8 @@ extensions = ['sphinx.ext.autosectionlabel']
 
 # ensure that autosectionlabel will produce unique names
 autosectionlabel_prefix_document = True
+
+from sphinx.application import Sphinx
+def setup(app: Sphinx) -> None:
+    from furo_ys.lexers.SBYLexer import SBYLexer
+    app.add_lexer("sby", SBYLexer)
