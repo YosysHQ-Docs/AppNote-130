@@ -125,7 +125,7 @@ Implementation
 
 We can implement the desired flow using a single ``staged.sby`` file that covers in stages 1 and 2, then splits into a cover and an assertion branch in stage 3:
 
-.. code-block:: text
+.. code-block:: sby
 
   [tasks]
   prep
@@ -268,7 +268,7 @@ After loading the design, we use the ``select`` command to disable all propertie
 
 After the user-provided script in the ``[script]`` section runs, SBY invokes the specified engine (``smtbmc``) to run formal verification on the filtered design. ``smtbmc`` produces a witness file, ``staged_stage_1/engine_0/trace0.yw``, which contains the sequence of values that led to the cover point being hit. The trace will look something like this:
 
-.. image:: ./image0.png
+.. image:: /_images/image0.png
         :align: center
 
 As you can see, the first req and ack pair occurs, followed by the second req pulse, at which point the trace ends.
@@ -281,7 +281,7 @@ Stage 2 begins by reading in the ``stage_1_init.il`` checkpoint, which represent
 Stage 2 then proceeds as did stage 1: we delete all non-stage-2 properties and run the stage-2 cover, producing the following trace:
 
 
-.. image:: ./image1.png
+.. image:: /_images/image1.png
         :align: center
 
 Crucially, you can see that the trace continues from where stage 1 left off, with the second req already issued and waiting for its ack, and with the counter values preserved.
@@ -293,7 +293,7 @@ Finally, in stage 3, we show a branching point with two separate tasks: first, a
 
 Finally, ``stage_3a_cover`` and ``stage_3b_assert`` both read the stage-3 checkpoint, filter down to their respective property sets (both including the stage-3 shared assumptions), and run cover/prove as appropriate. Stage 3a produces the following trace:
 
-.. image:: ./image2.png
+.. image:: /_images/image2.png
         :align: center
 
 As you can see, the trace continues from where stage 2 left off, with the third req already issued; within a few cycles, the third ack arrives, hitting the cover point.
