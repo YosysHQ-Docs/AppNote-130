@@ -306,11 +306,31 @@ To effectively use this method, first understand the caveats:
 
 - **Only remove properties between stages.** The RTLIL must remain the same aside from baked init values. Do not add or alter HDL, ports, or clocks between stages, or the witness mapping will fail.
 - **Keep environment signals free.** Anything mentioned in an ``assume`` that the environment controls must be an ``input`` or ``anyseq``; ``sim`` cannot drive outputs.
-- **Witness format.** Stick to ``.yw`` (Yosys witness). VCD is lossy and can miss anyseq/internal names; YW carries the exact solver-driven signals.
+- **Witness format.** Stick to ``.yw`` (Yosys witness). VCD is lossy and can miss anyseq/internal names; YW carries the exact solver-driven signals. See `Sharp Edges When Using VCD`_ for details.
 - **Initial-state handling.** Only the first replay starts at t=0. For any replay that continues from a prior witness, use ``sim -noinitstate`` to avoid re-applying ``$initstate`` logic.
 - **SBY-generated artifacts.** This flow depends on SBY-emitted files (for example, ``design_prep.il`` and per-stage ``engine_0/trace0.yw``). These names are implementation details and may change across SBY versions, requiring updates to ``[files]`` mappings and scripts.
 - **Sequential execution.** Run tasks one-by-one. SBY defaults to parallel task execution, which leads to race conditions on the intermediate ``.il``/``.yw`` artifacts. Always run tasks manually to ensure proper sequential execution.
 - **Skipping prep.** Only the first task should run SBY's full prep. All later tasks should set ``skip_prep on``.
+
+
+Sharp Edges When Using VCD
+--------------------------
+
+When replaying a trace with ``sim -r``, not all signals in the design are driven from the trace file. Specifically, ``sim`` maintains a whitelist of signals it will drive from the trace: currently, this includes only ``input`` ports and ``$anyseq`` nodes. Any signal that falls outside this whitelist — including undriven ``output`` ports — will not be driven from the VCD, even if the VCD contains values for it. This behavior is correct: ``sim`` avoids overriding signals that your design logic is expected to compute.
+
+This limitation does **not** apply to Yosys Witness (``.yw``) files. YW replay drives all signals recorded by the solver, including those that would be skipped from a VCD. **The preferred fix is always to use YW files instead of VCDs.**
+
+A concrete situation where this matters: suppose your design has an ``output`` port that is, in practice, driven by the environment rather than by internal logic (for example, ``ack`` in a request-acknowledgment interface that you modeled with ``assume`` rather than RTL logic). When the solver produces a counterexample, both the VCD and the YW will contain values for that output, but only the YW replay will apply those values to the signal. Replaying the VCD will leave the output undriven, producing incorrect design state for the next stage.
+
+SBY's own preparation flow converts undriven signals to ``$anyseq`` as part of its standard synthesis script, which is why this problem can go unnoticed when using SBY-managed flows.
+
+**How to avoid unexpected undriven signals:**
+
+1. **Use Yosys Witness files (recommended).** 
+
+2. **Explicitly annotate the signal as** ``anyseq``. You can mark a port or signal with the ``(* anyseq *)`` attribute (e.g., ``(* anyseq *) output logic ack``), which causes Yosys to treat it as a free variable that the solver drives. ``sim`` will then drive it from the VCD.
+
+3. **Apply** ``setundef -undriven -anyseq`` **during design preparation.** This Yosys pass converts all undriven signals to ``$anyseq`` nodes, which ``sim`` will drive from the VCD. This is similar to what SBY does internally.
 
 
 A Similar Example Using SCY
