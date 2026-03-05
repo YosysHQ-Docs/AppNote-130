@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 project = 'Multi-Stage Verification'
-author = 'Gus Smith'
-copyright = ''
+author = 'YosysHQ GmbH'
+copyright = '2026 YosysHQ GmbH'
 
 # select HTML theme
 html_theme = 'furo-ys'
